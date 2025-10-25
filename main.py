@@ -1,0 +1,3 @@
+import pyzed
+
+print(pyzed)

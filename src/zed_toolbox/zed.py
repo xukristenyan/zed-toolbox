@@ -5,7 +5,7 @@ import pyzed.sl as sl
 from PIL import Image
 
 
-class Zed:
+class ZedCamera:
     def __init__(self, serial, config: dict):
         self.serial = serial
         if not self.serial:
@@ -82,8 +82,8 @@ class Zed:
         # remove alpha layer
         img = raw_img.get_data()[:,:,:3]
         
-        # BGR -> RGB
-        img = img[:,:,::-1]
+        # # BGR -> RGB
+        # img = img[:,:,::-1]
         
         # resize
         image_pil = Image.fromarray(img)
@@ -124,3 +124,8 @@ class Zed:
         baseline = translation[0]
 
         return baseline
+
+
+    def get_rgbd(self):
+        with self._lock:
+            return self.state.copy()["left_image"], self.state.copy()["depth"]

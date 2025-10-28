@@ -1,14 +1,6 @@
-from zed_toolbox import Zed
+from zed_toolbox import ZedCamera
 import cv2
-
-def save_calibration_file(filepath, K, baseline):        
-    k_flat = " ".join([str(val) for val in K.flatten()])
-    baseline_str = f"{baseline:.18f}" 
-
-    with open(filepath, 'w') as f:
-        f.write(f"{k_flat}\n")
-        f.write(f"{baseline_str}\n")
-    print(f"Successfully saved calibration file to {filepath}")
+from zed_toolbox.utils import save_calibration_file
 
 
 def main():
@@ -21,15 +13,18 @@ def main():
 
     camera = None
     try:
-        camera = Zed(serial, specs)
+        camera = ZedCamera(serial, specs)
         camera.launch()
 
         while True:
             state = camera.get_current_state()
+            rgb, d = camera.get_rgbd()
 
             if state["left_image"] is not None and state["right_image"] is not None:
                 break
 
+        print(rgb.shape)
+        print(d.shape)
         cv2.imwrite("ir_left.png", state["left_image"])
         cv2.imwrite("ir_right.png", state["right_image"])
 

@@ -14,6 +14,9 @@ class ZedCamera:
         self.fps = config.get("fps", 30)
         self.size = config.get("size", (1280, 720))
 
+        self.auto_exposure = config.get("auto_exposure", False)
+        self.exposure = config.get("exposure", 80)  # Manual exposure value (1-100)
+
         # instantiate a ZED camera
         self.camera = sl.Camera()
         self.init_params = sl.InitParameters()
@@ -30,16 +33,27 @@ class ZedCamera:
         self._lock = threading.Lock()
 
         self.state = {"timestamp": None, "left_image": None, "right_image": None, "depth": None}
+        self.intrinsics_cache = None
 
 
     def launch(self):
         err = self.camera.open(self.init_params)
         if err != sl.ERROR_CODE.SUCCESS:
             raise Exception(f"[Zed {str(self.serial)[-3:]}] Failed to launch. Check camera connection!")
+
+        self.camera.set_camera_settings(sl.VIDEO_SETTINGS.AEC_AGC, 1 if self.auto_exposure else 0)
+
         self.closed = False
 
         self._thread = threading.Thread(target=self._update_frame, daemon=True)
         self._thread.start()
+
+        info = self.camera.get_camera_information()
+        calib = info.camera_configuration.calibration_parameters.left_cam
+        self.intrinsics_cache = {
+            "fx": calib.fx, "fy": calib.fy,
+            "cx": calib.cx, "cy": calib.cy
+        }
 
         print(f"[Zed {str(self.serial)[-3:]}] Launched!")
 
@@ -129,3 +143,28 @@ class ZedCamera:
     def get_rgbd(self):
         with self._lock:
             return self.state.copy()["left_image"], self.state.copy()["depth"]
+        
+
+    def deproject_to_3d(self, point):
+        u, v = point
+        depth_map = self.state.get("depth")
+        if depth_map is None:
+            return None, None, None
+
+        height, width = depth_map.shape
+
+        u, v = int(u), int(v)
+        Z = depth_map[v, u]
+
+        if not np.isfinite(Z):
+            return None, None, None
+        
+        fx = self.intrinsics_cache["fx"]
+        fy = self.intrinsics_cache["fy"]
+        cx = self.intrinsics_cache["cx"]
+        cy = self.intrinsics_cache["cy"]
+
+        X = ((u - cx) * Z) / fx
+        Y = ((v - cy) * Z) / fy
+
+        return X, Y, Z

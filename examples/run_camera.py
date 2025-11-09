@@ -1,5 +1,5 @@
 '''
-In this example, it launches a realsense camera with live view of the streaming and recording.
+In this example, it launches a zed camera with live view of the streaming and recording.
 '''
 import time
 from zed_toolbox.camera import Camera
@@ -7,7 +7,7 @@ from zed_toolbox.camera import Camera
 def main():
 
     # ===== YOUR CHANGES =====
-    serial = 24944966
+    serial = 12345678  # replace with your camera serial number
 
     # see readme for full configurations.
     camera_config = {

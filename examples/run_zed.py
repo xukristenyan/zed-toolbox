@@ -4,7 +4,7 @@ from zed_toolbox.utils import save_calibration_file
 
 
 def main():
-    serial = 24944966
+    serial = 12345678  # replace with your camera serial number
 
     specs = {
         "fps": 30,

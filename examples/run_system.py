@@ -10,8 +10,8 @@ from zed_toolbox.system import CameraSystem
 def main():
 
     # ===== YOUR CHANGES =====
-    serial1 = 24944966
-    serial2 = 24944966
+    serial1 = 12345678  # replace with your camera serial number
+    serial2 = 23456789  # replace with your camera serial number
 
     # see readme for full configurations.
     cam1_config = {

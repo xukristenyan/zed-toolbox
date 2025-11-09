@@ -8,7 +8,8 @@ def main():
 
     specs = {
         "fps": 30,
-        "size": (1280, 720)
+        "size": (1280, 720),
+        "auto_exposure": False,
     }
 
     camera = None
@@ -25,8 +26,8 @@ def main():
 
         print(rgb.shape)
         print(d.shape)
-        cv2.imwrite("ir_left.png", state["left_image"])
-        cv2.imwrite("ir_right.png", state["right_image"])
+        cv2.imwrite("left.png", state["left_image"])
+        cv2.imwrite("right.png", state["right_image"])
 
         K, dist = camera.get_intrinsics()
 

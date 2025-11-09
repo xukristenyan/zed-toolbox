@@ -13,9 +13,7 @@ class ZedCamera:
         
         self.fps = config.get("fps", 30)
         self.size = config.get("size", (1280, 720))
-
-        self.auto_exposure = config.get("auto_exposure", False)
-        self.exposure = config.get("exposure", 80)  # Manual exposure value (1-100)
+        self.auto_exposure = config.get("auto_exposure", True)
 
         # instantiate a ZED camera
         self.camera = sl.Camera()

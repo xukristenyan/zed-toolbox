@@ -16,12 +16,13 @@ def main():
 
         "specifications": {
             "fps": 30,
+            "auto_exposure": False,
         },
 
         "viewer": {                     # no need to keep this dict if "enable_viewer" is False
             "show_color": True,
             "show_depth": True,
-            "fps": 10
+            "fps": 30
         },
 
         "recorder": {                   # no need to keep this dict if "enable_recorder" is False

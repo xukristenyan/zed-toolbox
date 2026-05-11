@@ -10,6 +10,8 @@ def main():
         "fps": 30,
         "size": (1280, 720),
         "auto_exposure": False,
+        "exposure": 20,
+        "gain": 50,
     }
 
     camera = None

@@ -1,4 +1,3 @@
-import time
 import threading
 import numpy as np
 import pyzed.sl as sl
@@ -6,7 +5,7 @@ from PIL import Image
 
 
 class ZedCamera:
-    def __init__(self, serial, config: dict):
+    def __init__(self, serial, config):
         self.serial = serial
         if not self.serial:
             raise ValueError("Missing camera serial number.")
@@ -24,6 +23,7 @@ class ZedCamera:
         self.init_params.set_from_serial_number(self.serial)
         self.init_params.camera_fps = self.fps
         self.init_params.camera_resolution = sl.RESOLUTION.HD720
+        # self.init_params.camera_resolution = sl.RESOLUTION.HD2K
         self.init_params.depth_mode = sl.DEPTH_MODE.NEURAL 
         self.init_params.coordinate_units = sl.UNIT.METER 
 
@@ -73,7 +73,7 @@ class ZedCamera:
         self.camera.close()
         self.closed = True
 
-        print(f"[Zed {str(self.serial)[-3:]}] Shutdown complete.")
+        print(f"[Zed {str(self.serial)[-3:]}] Shutdown completed.")
 
 
     def _update_frame(self):

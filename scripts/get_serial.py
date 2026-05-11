@@ -9,7 +9,7 @@ def get_zed_serial_number():
     zed = sl.Camera()
     
     init_params = sl.InitParameters()
-        err = zed.open(init_params)
+    err = zed.open(init_params)
     
     if err != sl.ERROR_CODE.SUCCESS:
         print(f"Failed to open ZED camera: {err}")

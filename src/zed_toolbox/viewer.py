@@ -58,7 +58,7 @@ class Viewer:
 
         cv2.imshow(self.name, display_image)
        
-        if quit_keypress() or cv2.getWindowProperty(self.name, cv2.WND_PROP_VISIBLE) < 1:
+        if quit_keypress():
             cv2.destroyAllWindows()
             self.viewer_alive = False
             return self.viewer_alive

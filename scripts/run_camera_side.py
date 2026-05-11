@@ -17,7 +17,7 @@ def main():
         "specifications": {
             "fps": 30,
             "auto_exposure": False,
-            "exposure": 25,
+            "exposure": 20,
             "gain": 45,
         },
 

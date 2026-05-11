@@ -16,7 +16,7 @@ def main():
         "specifications": {
             "fps": 30,
             "auto_exposure": False,
-            "exposure": 20,
+            "exposure": 15,
             "gain": 50,
         },
 
@@ -44,22 +44,8 @@ def main():
 
         while True:
 
-            # ===== YOUR CHANGES =====
-            # mimic overlays to be added
-            moving_x = int(100 + 50 * (1 + time.time() % 4))
-            
-            # see readme for full configurations.
-            overlays = [
-                {
-                    "type": "dot",
-                    "xy": (moving_x, 200),
-                    # "radius": 8,
-                    # "color": (0, 255, 0) # Green
-                }
-            ]
-            # ========================
 
-            camera.update(overlays=overlays)
+            camera.update()
 
             if not camera.is_alive:
                 break

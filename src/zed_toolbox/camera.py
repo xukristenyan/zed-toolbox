@@ -88,6 +88,14 @@ class Camera:
         return self.state
 
 
+    def get_intrinsics(self):
+        return self.zed_camera.get_intrinsics()
+
+
+    def get_baseline(self):
+        return self.zed_camera.get_baseline()
+
+
     def shutdown(self):
         if self.recorder:
             self.recorder.stop()

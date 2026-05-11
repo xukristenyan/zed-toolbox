@@ -59,6 +59,22 @@ class CameraSystem:
         return all_frames
 
 
+    def get_intrinsics(self):
+        intrinsics = {}
+
+        for serial, camera in self.cameras.items():
+            K, dist = camera.zed_camera.get_intrinsics()
+            baseline = camera.zed_camera.get_baseline()
+
+            intrinsics[serial] = {
+                "K": K,
+                "distortion": dist,
+                "baseline": baseline
+            }
+
+        return intrinsics
+
+
     def shutdown(self):
         for camera in self.cameras.values():
             camera.shutdown()

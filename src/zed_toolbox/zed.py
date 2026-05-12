@@ -1,177 +1,197 @@
+import time
 import threading
 import numpy as np
 import pyzed.sl as sl
-from PIL import Image
+
+from .config import ZedConfig
 
 
 class ZedCamera:
-    def __init__(self, serial, config):
-        self.serial = serial
-        if not self.serial:
+    """
+    Stream from a single ZED stereo camera in a background thread.
+
+    Access images via attributes (left_image, right_image, depth_image —
+    only the streams enabled in config are populated) or via
+    get_current_state() for a snapshot dict under lock.
+
+    The left camera anchors the canonical intrinsics; depth (when enabled)
+    is registered to the left frame.
+    """
+
+    def __init__(self, serial, config=None):
+        if not serial:
             raise ValueError("Missing camera serial number.")
-        
-        self.fps = config.get("fps", 30)
-        self.size = config.get("size", (1280, 720))
+        self.serial = serial
 
-        self.auto_exposure = config.get("auto_exposure", False)
-        self.exposure = config.get("exposure", 65)  # manual exposure value (1-100)
-        self.gain = config.get("gain", 60)      # set a higher value when exposure cannot be increased further
+        if config is None:
+            config = ZedConfig()
+        elif isinstance(config, dict):
+            config = ZedConfig(**config)
+        self.cfg = config
 
-        # instantiate a ZED camera
+        self._has_left = "left" in self.cfg.streams
+        self._has_right = "right" in self.cfg.streams
+        self._has_depth = "depth" in self.cfg.streams
+
         self.camera = sl.Camera()
-        self.init_params = sl.InitParameters()
-        self.init_params.set_from_serial_number(self.serial)
-        self.init_params.camera_fps = self.fps
-        self.init_params.camera_resolution = sl.RESOLUTION.HD720
-        # self.init_params.camera_resolution = sl.RESOLUTION.HD2K
-        self.init_params.depth_mode = sl.DEPTH_MODE.NEURAL 
-        self.init_params.coordinate_units = sl.UNIT.METER 
-
-        self.closed = True
+        self.init_params = self._build_init_params()
 
         self._thread = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._started = False
 
-        self.state = {"timestamp": None, "left_image": None, "right_image": None, "depth": None}
-        self.intrinsics_cache = None
+        self.left_image = None
+        self.right_image = None
+        self.depth_image = None
+
+        self.intrinsics = None
+
+
+    def _build_init_params(self):
+        params = sl.InitParameters()
+        params.set_from_serial_number(self.serial)
+        params.camera_fps = self.cfg.fps
+        params.camera_resolution = sl.RESOLUTION[self.cfg.resolution]
+        params.depth_mode = sl.DEPTH_MODE[self.cfg.depth_mode]
+        params.coordinate_units = sl.UNIT[self.cfg.coordinate_units]
+        return params
 
 
     def launch(self):
-        err = self.camera.open(self.init_params)
-        if err != sl.ERROR_CODE.SUCCESS:
-            raise Exception(f"[Zed {str(self.serial)[-3:]}] Failed to launch. Check camera connection!")
+        try:
+            err = self.camera.open(self.init_params)
+            if err != sl.ERROR_CODE.SUCCESS:
+                raise RuntimeError(
+                    f"sl.Camera.open() failed with {err}. Check camera connection."
+                )
+            self._started = True
 
-        # # adjust exposure
-        if self.auto_exposure:
-            self.camera.set_camera_settings(sl.VIDEO_SETTINGS.AEC_AGC, 1)
+            if self.cfg.auto_exposure:
+                self.camera.set_camera_settings(sl.VIDEO_SETTINGS.AEC_AGC, 1)
+            else:
+                self.camera.set_camera_settings(sl.VIDEO_SETTINGS.AEC_AGC, 0)
+                self.camera.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, self.cfg.exposure)
+                self.camera.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, self.cfg.gain)
 
-        else:
-            self.camera.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, self.exposure)
-            self.camera.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, self.gain)
+            self._capture_intrinsics()
 
-        self.closed = False
+            for _ in range(30):
+                self.camera.grab()
 
-        self._thread = threading.Thread(target=self._update_frame, daemon=True)
-        self._thread.start()
+            self._thread = threading.Thread(target=self._update_frame, daemon=True)
+            self._thread.start()
 
+            print(f"[Zed {str(self.serial)[-3:]}] Launched!")
+
+        except Exception as e:
+            print(f"[Zed {str(self.serial)[-3:]}] Failed to launch ({type(e).__name__}: {e})")
+            self.shutdown()
+            raise
+
+
+    def _capture_intrinsics(self):
         info = self.camera.get_camera_information()
-        calib = info.camera_configuration.calibration_parameters.left_cam
-        self.intrinsics_cache = {
-            "fx": calib.fx, "fy": calib.fy,
-            "cx": calib.cx, "cy": calib.cy
+        calib = info.camera_configuration.calibration_parameters
+        left = calib.left_cam
+
+        K = np.array([
+            [left.fx, 0,       left.cx],
+            [0,       left.fy, left.cy],
+            [0,       0,       1],
+        ])
+        translation = calib.stereo_transform.get_translation().get()
+        baseline = float(abs(translation[0]))
+
+        self.intrinsics = {
+            "matrix": K,
+            "raw": left,
+            "baseline": baseline,
         }
-
-        print(f"[Zed {str(self.serial)[-3:]}] Launched!")
-
-
-    def shutdown(self):
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=2)
-
-        self.camera.close()
-        self.closed = True
-
-        print(f"[Zed {str(self.serial)[-3:]}] Shutdown completed.")
 
 
     def _update_frame(self):
-        left = sl.Mat()
-        right = sl.Mat()
-        depth = sl.Mat()
-        
-        while not self.closed and not self._stop_event.is_set() and self.camera.grab() == sl.ERROR_CODE.SUCCESS:
-            self.camera.retrieve_image(left, sl.VIEW.LEFT)
-            self.camera.retrieve_image(right, sl.VIEW.RIGHT)
-            self.camera.retrieve_measure(depth, sl.MEASURE.DEPTH)
-            timestamp = self.camera.get_timestamp(sl.TIME_REFERENCE.IMAGE).get_milliseconds()
+        left = sl.Mat() if self._has_left else None
+        right = sl.Mat() if self._has_right else None
+        depth = sl.Mat() if self._has_depth else None
 
-            left_image = self.prep_img(left)
-            right_image = self.prep_img(right)
-            # now in np.array(720, 1080, (r, g, b))
-            depth_info = depth.get_data()
+        while not self._stop_event.is_set():
+            try:
+                if self.camera.grab() != sl.ERROR_CODE.SUCCESS:
+                    continue
 
-            with self._lock:
-                self.state.update({"timestamp": timestamp, 
-                                    "left_image": left_image,
-                                    "right_image": right_image,
-                                    "depth": depth_info})
+                if left is not None:
+                    self.camera.retrieve_image(left, sl.VIEW.LEFT)
+                if right is not None:
+                    self.camera.retrieve_image(right, sl.VIEW.RIGHT)
+                if depth is not None:
+                    self.camera.retrieve_measure(depth, sl.MEASURE.DEPTH)
 
+                with self._lock:
+                    if left is not None:
+                        self.left_image = np.ascontiguousarray(left.get_data()[:, :, :3])
+                    if right is not None:
+                        self.right_image = np.ascontiguousarray(right.get_data()[:, :, :3])
+                    if depth is not None:
+                        self.depth_image = depth.get_data().copy()
 
-    def prep_img(self, raw_img):
-        # remove alpha layer
-        img = raw_img.get_data()[:,:,:3]
-        
-        # # BGR -> RGB
-        # img = img[:,:,::-1]
-        
-        # resize
-        image_pil = Image.fromarray(img)
-        image_resized_pil = image_pil.resize(self.size)
-        resized_image = np.array(image_resized_pil)
-
-        return resized_image
+            except Exception as e:
+                print(f"[Zed {str(self.serial)[-3:]}] Error in capture thread: {e}")
+                time.sleep(0.5)
 
 
     def get_current_state(self):
         with self._lock:
-            return self.state.copy()
+            imgs = {
+                "left": self.left_image,
+                "right": self.right_image,
+                "depth": self.depth_image,
+            }
+            return {k: v for k, v in imgs.items() if v is not None}
 
 
     def get_intrinsics(self):
-        info = self.camera.get_camera_information()
-        calib_params = info.camera_configuration.calibration_parameters
-        calib = calib_params.left_cam
-        
-        fx, fy = calib.fx, calib.fy
-        cx, cy = calib.cx, calib.cy
-        K = np.array([
-            [fx, 0,  cx],
-            [0,  fy, cy],
-            [0,  0,  1]
-        ])
-
-        disto = calib.disto
-        
-        return K, disto
+        return self.intrinsics
 
 
-    def get_baseline(self):
-        info = self.camera.get_camera_information()
-        stereo_transform = info.camera_configuration.calibration_parameters.stereo_transform
+    def deproject_pixel_to_point(self, xy):
+        """
+        (u, v) pixel -> 3D point in the left-camera frame.
 
-        translation = stereo_transform.get_translation().get()
-        baseline = translation[0]
+        Returns None if depth is disabled, the pixel is out of bounds, or
+        the depth value is invalid. Units match cfg.coordinate_units.
+        """
+        if not self._has_depth or self.intrinsics is None:
+            raise RuntimeError(
+                "deproject_pixel_to_point requires the 'depth' stream and a launched camera."
+            )
+        u, v = int(xy[0]), int(xy[1])
 
-        return baseline
-
-
-    def get_rgbd(self):
         with self._lock:
-            return self.state.copy()["left_image"], self.state.copy()["depth"]
-        
+            if self.depth_image is None:
+                return None
+            h, w = self.depth_image.shape[:2]
+            if not (0 <= u < w and 0 <= v < h):
+                return None
+            z = float(self.depth_image[v, u])
 
-    def deproject_to_3d(self, point):
-        u, v = point
-        depth_map = self.state.get("depth")
-        if depth_map is None:
-            return None, None, None
+        if not np.isfinite(z) or z <= 0:
+            return None
 
-        height, width = depth_map.shape
+        K = self.intrinsics["matrix"]
+        fx, fy = K[0, 0], K[1, 1]
+        cx, cy = K[0, 2], K[1, 2]
+        x = (u - cx) * z / fx
+        y = (v - cy) * z / fy
+        return [x, y, z]
 
-        u, v = int(u), int(v)
-        Z = depth_map[v, u]
 
-        if not np.isfinite(Z):
-            return None, None, None
-        
-        fx = self.intrinsics_cache["fx"]
-        fy = self.intrinsics_cache["fy"]
-        cx = self.intrinsics_cache["cx"]
-        cy = self.intrinsics_cache["cy"]
-
-        X = ((u - cx) * Z) / fx
-        Y = ((v - cy) * Z) / fy
-
-        return X, Y, Z
+    def shutdown(self):
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+        if self._started:
+            self.camera.close()
+            self._started = False
+        print(f"[Zed {str(self.serial)[-3:]}] Shutdown complete.")
